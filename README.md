@@ -40,6 +40,25 @@ curl -s localhost:8000/api/ingestions/<ingestion_id> -H "X-API-Key: $KEY"
 
 An operator key (`--role operator`) is needed for promote, reprocess and listing.
 
+## Tasks (just)
+
+Common tasks are recipes in [`justfile`](justfile); run `just` to list them all.
+
+| Recipe | What it does |
+| --- | --- |
+| `just up` / `down` / `nuke` | Start the Docker stack and wait for a worker heartbeat / stop it / stop and delete data |
+| `just logs [service]`, `just ps`, `just psql` | Inspect the local stack |
+| `just dev` | Postgres in Docker, web (with reload) and worker on the host via `Procfile.dev` |
+| `just check` | Lint, format check, mypy, and the full test suite (creates `paxafe_test` if missing) |
+| `just key NAME [ROLE]`, `keys`, `revoke ID`, `reprocess ...` | Key and queue operations on the local database |
+| `just health [URL]`, `wait-healthy [URL]` | Check `/livez` and `/health` |
+| `just neon-migrate`, `neon-key`, `neon-keys`, `neon-revoke`, `neon-reprocess`, `neon-psql` | The same against Neon (`NEON_DATABASE_URL` in `.env`) |
+| `just deploy` | Run `check`, refuse a dirty tree, push `main` (Render auto-deploys), wait for health |
+| `just redeploy`, `prod-health` | Trigger the Render deploy hook / check the deployed service |
+
+Production values (`NEON_DATABASE_URL`, `API_URL`, `RENDER_DEPLOY_HOOK`) go in `.env`, which is
+gitignored; see `.env.example`.
+
 ## Local setup
 
 * Python 3.12 and [uv](https://docs.astral.sh/uv/); Docker for Postgres.

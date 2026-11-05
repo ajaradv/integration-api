@@ -1,8 +1,28 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def normalize_database_url(url: str) -> str:
+    """Accept a libpq-style URL (as Neon's console shows it) and return an asyncpg one.
+
+    postgres:// and postgresql:// become postgresql+asyncpg://, `sslmode` becomes
+    asyncpg's `ssl`, and `channel_binding` (unsupported by asyncpg) is dropped.
+    """
+    parts = urlsplit(url)
+    scheme = parts.scheme
+    if scheme in ("postgres", "postgresql"):
+        scheme = "postgresql+asyncpg"
+    query = []
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        if key == "channel_binding":
+            continue
+        query.append(("ssl" if key == "sslmode" else key, value))
+    return urlunsplit((scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 class Settings(BaseSettings):
@@ -20,6 +40,11 @@ class Settings(BaseSettings):
     heartbeat_interval_s: float = 10.0
     heartbeat_stale_s: float = 60.0
     livez_grace_s: float = 90.0
+
+    @field_validator("database_url")
+    @classmethod
+    def _normalize_url(cls, value: str) -> str:
+        return normalize_database_url(value)
 
 
 @lru_cache
