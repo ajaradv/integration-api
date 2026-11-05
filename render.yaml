@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: paxafe-integration-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /livez
+    envVars:
+      - key: DATABASE_URL
+        sync: false # Neon DIRECT (non-pooled) URL, postgresql+asyncpg://...
+      - key: LOG_LEVEL
+        value: INFO
