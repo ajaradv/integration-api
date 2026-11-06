@@ -131,7 +131,7 @@ wait-healthy url=local_url tries="60":
 
 [private]
 need var:
-    @test -n "${{var}}" || { echo "{{var}} is not set; add it to .env" >&2; exit 1; }
+    @[ -n "$(printenv {{var}})" ] || { echo "{{var}} is not set; add it to .env" >&2; exit 1; }
 
 # Run migrations against Neon (Render also runs them on every start)
 neon-migrate: (need "NEON_DATABASE_URL")
