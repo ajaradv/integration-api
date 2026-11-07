@@ -19,8 +19,16 @@ payloads is in [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 ## Live URLs and test key
 
-Not deployed from this checkout. After deploying (see Deployment), record here: API URL,
-`/docs` URL, and the test sender key created with the CLI.
+| | URL |
+| --- | --- |
+| Integration API | https://paxafe-integration-api.onrender.com |
+| OpenAPI docs | https://paxafe-integration-api.onrender.com/docs |
+| Health | https://paxafe-integration-api.onrender.com/livez, `/health` |
+| Mock Tive Sender | https://paxafe-mock-tive-sender.onrender.com |
+
+Hosted on Render's free tier with Neon Postgres (us-east-2). Services sleep after about 15 idle
+minutes; the first request then takes 30-60 s. The test sender key is shared separately and is
+never committed.
 
 ## Quickstart
 
@@ -189,17 +197,17 @@ generated from them and CHECK-constrained), `readings_history`, `worker_heartbea
 
 ## Deployment (Render + Neon)
 
-1. Create a free Neon project; copy the **direct** (non-pooled) connection string and change the
-   scheme to `postgresql+asyncpg://` (asyncpg does not take `sslmode=`; use `?ssl=require`).
+1. Create a Neon project and copy the **direct** (non-pooled) connection string. It can be pasted
+   as Neon shows it: `app.config` converts `postgresql://...?sslmode=require` to the asyncpg form.
 2. Create a Render Blueprint from `render.yaml` and set the `DATABASE_URL` secret.
    Migrations run at container start; honcho runs web and worker in one container. Move
    migrations to a release step if the service ever runs more than one instance.
-3. Create keys from a laptop (Render's free instances have no shell):
-   `DATABASE_URL=<neon-url> uv run python -m app.cli create-key --name mock-sender --role sender`.
-4. Migrations only add columns or tables (convention, not enforced), so redeploying the previous
+3. Put `NEON_DATABASE_URL` in `.env` and create keys from a laptop (Render's free instances have
+   no shell): `just neon-migrate`, then `just neon-key mock-sender sender`.
+4. `just deploy` runs the checks and pushes `main`; Render deploys on push. `just prod-health`
+   checks the live service.
+5. Migrations only add columns or tables (convention, not enforced), so redeploying the previous
    image is a safe rollback.
-
-Not deployed or run against Render/Neon from this checkout.
 
 ## Assumptions
 
