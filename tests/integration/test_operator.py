@@ -251,7 +251,8 @@ async def test_listing_filters_and_paginates(
     await drain()
     r = await client.get("/api/ingestions?status=quarantined", headers=operator_key.headers)
     assert r.status_code == 200
-    assert len(r.json()["items"]) == 5 and r.json()["next_cursor"] is None
+    # 5 from the design table plus sample 4, which fails R13 against sample 3
+    assert len(r.json()["items"]) == 6 and r.json()["next_cursor"] is None
 
     seen: list[str] = []
     cursor = None

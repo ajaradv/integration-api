@@ -103,6 +103,24 @@ now lists `timestamp_mismatch` as a warning. Result: 8 readings, 5 quarantined.
   `unchanged` and promotion succeeds. `422` is also returned if the stored root is not an object.
 * An override of `timestamp` does not touch `EntryTimeUtc`; if they then disagree R6 still blocks.
 * `promoted` ingestions have `attempts` unchanged and `processed_at` set to the promotion time.
+* `acknowledge` (only `location_jump`) is recorded in `promotion_overrides`. The acknowledged
+  issue stays in `issues` as a warning with `source = operator`, so the audit trail keeps it.
+
+## R13 location continuity
+
+* The formula is in `app/transform/continuity.py` (pure). The neighbour lookup and the
+  `pg_advisory_xact_lock` live in `repository.with_continuity`, called by the worker and by
+  promotion in the same transaction as the write.
+* Baselines come from `readings` only, so quarantined readings never become one. A neighbour
+  at the same timestamp is ignored: that is a replacement, handled by the upsert.
+* R13 runs only when the PX location has a valid IMEI, integer timestamp and in-range
+  coordinates; otherwise earlier rules already quarantine the payload.
+* `claim_batch` sorts by `received_at` and the worker runs one device's rows in order
+  (`device_lanes`), so the later arrival is the one flagged.
+* The outcome now depends on stored readings, so reprocessing the same body can give a
+  different result than the first run. `original` records which baseline was used.
+* End to end, sample 4 is quarantined against sample 3 (3,921 km in 1 h); the pure
+  pipeline table (`EXPECTED`) is unchanged and `E2E_EXPECTED` adds that row.
 
 ## Tooling and layout
 

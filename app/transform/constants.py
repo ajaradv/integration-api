@@ -33,3 +33,11 @@ HUMIDITY: tuple[float, float] = (0.0, 100.0)
 BATTERY: tuple[float, float] = (0.0, 100.0)
 DBM: tuple[float, float] = (-150.0, -50.0)
 LUX_MIN = 0.0
+
+# R13 location continuity: the fastest plausible shipment (air freight plus margin), a fixed
+# allowance so short gaps never flag, and the accuracy assumed when a fix reports none (the
+# "Low" accuracy boundary).
+EARTH_RADIUS_M = 6_371_008.8
+LOCATION_JUMP_MAX_SPEED_MPS = 1000 / 3.6  # 1000 km/h
+LOCATION_JUMP_FLOOR_M = 1000.0
+LOCATION_JUMP_DEFAULT_ACCURACY_M = 500.0

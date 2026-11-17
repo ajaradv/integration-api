@@ -68,6 +68,7 @@ async def process_one(
             else:
                 result = transform(row["raw_json"], None, now)
             async with engine.begin() as conn:
+                result = await repo.with_continuity(conn, result)
                 status = await repo.persist_result(
                     conn,
                     ingestion_id=id_,
@@ -129,8 +130,28 @@ async def run_once(engine: AsyncEngine, settings: Settings) -> int:
     async with engine.begin() as conn:
         rows = await repo.claim_batch(conn, settings.worker_max_jobs, settings.max_attempts)
     if rows:
-        await asyncio.gather(*(_run_job(engine, settings, r) for r in rows))
+        await asyncio.gather(*(_run_lane(engine, settings, lane) for lane in device_lanes(rows)))
     return len(rows)
+
+
+def device_lanes(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Group claimed rows by device, keeping arrival order within each group.
+
+    Devices run concurrently; one device's readings run in order, so R13 checks each against
+    the one received before it rather than whichever happened to finish first.
+    """
+    lanes: dict[Any, list[dict[str, Any]]] = {}
+    for row in rows:
+        raw = row.get("raw_json")
+        device = raw.get("DeviceId") if isinstance(raw, dict) else None
+        key = device if isinstance(device, str) and device else row["id"]
+        lanes.setdefault(key, []).append(row)
+    return list(lanes.values())
+
+
+async def _run_lane(engine: AsyncEngine, settings: Settings, lane: list[dict[str, Any]]) -> None:
+    for row in lane:
+        await _run_job(engine, settings, row)
 
 
 async def run(settings: Settings, engine: AsyncEngine, stop: asyncio.Event | None = None) -> None:

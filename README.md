@@ -100,7 +100,7 @@ Interactive docs at `/docs`. Errors are `{"error": {"code", "message", "details?
 | `GET /api/ingestions/{id}` | sender, operator | Status, issues, PX records, candidates |
 | `GET /api/ingestions/batch?ids=a,b,...` | sender, operator | Up to 100 views as `{"items": [...]}`; a sender sees only its own |
 | `GET /api/ingestions?status=&device_imei=&limit=&cursor=` | operator | Keyset-paginated list |
-| `POST /api/ingestions/{id}/promote` | operator | `{overrides, note, replace_existing?}` |
+| `POST /api/ingestions/{id}/promote` | operator | `{overrides, note, replace_existing?, acknowledge?}` |
 | `POST /api/ingestions/{id}/reprocess` | operator | Re-run the transform on the stored body |
 | `POST /api/ingestions/reprocess?status=&limit=` | operator | Bulk reprocess (max 500) -> `{"queued": n}` |
 | `GET /livez`, `GET /health`, `GET /docs` | none | Liveness (503 only for a hung worker), diagnostics, OpenAPI |
@@ -122,7 +122,9 @@ Webhook status codes:
 
 The request path does no Tive-specific validation; the worker (a Postgres-table queue with
 `FOR UPDATE SKIP LOCKED`) parses every field on its own, runs rules R0-R12, maps to PX, and checks
-the output against the vendored PX JSON schemas.
+the output against the vendored PX JSON schemas. R13 then compares the location with the device's
+neighbouring stored readings, under a per-device advisory lock; one device's readings in a batch run in
+arrival order.
 
 | Status | Meaning |
 | --- | --- |
@@ -134,7 +136,7 @@ the output against the vendored PX JSON schemas.
 | `rejected` | body is not JSON, or its root is not an object |
 | `failed` | unexpected errors after `MAX_ATTEMPTS` (5) attempts |
 
-## Edge-case policy (R0-R12)
+## Edge-case policy (R0-R13)
 
 | # | Rule | Outcome |
 | --- | --- | --- |
@@ -151,6 +153,7 @@ the output against the vendored PX JSON schemas.
 | R10 | probe temperature outside [-100, 100] | warning `probe_fault`; stored null with `probe_fault = true` |
 | R11 | humidity [0,100], lux >= 0, battery [0,100], dBm [-150,-50], accuracy >= 0 | warning, PX field null |
 | R12 | `Accelerometer.G` null but X, Y, Z present | correction `magnitude_computed` |
+| R13 | Same device: the fix must be reachable from the stored reading just before and just after it: `max(0, haversine - (acc1 + acc2)) <= 1000 km/h * dt + 1 km` (accuracy defaults to 500 m) | blocking `location_jump`; promote with `acknowledge: ["location_jump"]` |
 
 Numeric strings are converted (correction `number_from_string`) in measurement fields only;
 identity, time and coordinate fields are strict (`type_error`).
@@ -163,7 +166,7 @@ Per-sample outcomes (tested in `tests/unit/test_pipeline_samples.py` and
 | 1 | Standard Temperature Shipment | accepted | warning `shipment_device_mismatch` |
 | 2 | Device A571992 Reading | quarantined | `latitude_out_of_range` |
 | 3 | GPS Location Shipment | accepted | none |
-| 4 | Vaccine Shipment Checkpoint | accepted | warning `probe_fault` |
+| 4 | Vaccine Shipment Checkpoint | accepted (pipeline) / quarantined (end to end) | warning `probe_fault`; end to end also `location_jump`: 3,921 km from sample 3 in 1 h |
 | 5 | Device Name Only | quarantined | `device_imei_missing` |
 | 6 | Biologics Replenishment Shipment | quarantined | `timestamp_implausible`; warning `timestamp_mismatch` |
 | 7 | Cellular Location Only | accepted | warning `probe_fault`; accuracy 500 m -> Medium |
@@ -176,7 +179,9 @@ Per-sample outcomes (tested in `tests/unit/test_pipeline_samples.py` and
 
 **Sample 12** carries an `EntryTimeUtc` (`14:27:26Z`) exactly 5 hours earlier than its
 `EntryTimeEpoch` (`19:27:26Z`), which looks like local time labelled as UTC. R6 trusts the integer
-epoch and only warns, so the reading is stored. Result: 8 readings, 5 quarantined.
+epoch and only warns, so the reading is stored. **Sample 4** passes the stateless rules, but
+end to end R13 compares it with sample 3 (same device, San Francisco one hour earlier) and
+quarantines it. Result end to end: 7 readings, 6 quarantined.
 
 ## Idempotency
 

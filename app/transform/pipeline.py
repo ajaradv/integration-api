@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.transform import mapping
+from app.transform.continuity import Neighbour, check_location_jump
 from app.transform.issues import Issue, IssueCode, Severity
 from app.transform.mapping import SensorExtras
 from app.transform.output_validation import validate_px
@@ -98,10 +99,31 @@ def transform(raw: Any, overrides: Mapping[str, Any] | None, now_ms: int) -> Pip
     if not any(i.severity == Severity.BLOCKING for i in issues):
         issues.extend(validate_px("sensor", px_sensor))
         issues.extend(validate_px("location", px_location))
+    return PipelineResult(_status_hint(issues), issues, px_sensor, px_location, extras)
+
+
+def _status_hint(issues: list[Issue]) -> str:
     if any(i.severity == Severity.BLOCKING for i in issues):
-        hint = "quarantined"
-    elif any(i.severity == Severity.CORRECTION for i in issues):
-        hint = "accepted_with_corrections"
-    else:
-        hint = "accepted"
-    return PipelineResult(hint, issues, px_sensor, px_location, extras)
+        return "quarantined"
+    if any(i.severity == Severity.CORRECTION for i in issues):
+        return "accepted_with_corrections"
+    return "accepted"
+
+
+def apply_continuity(
+    result: PipelineResult,
+    previous: Neighbour | None,
+    following: Neighbour | None,
+    acknowledged: bool = False,
+) -> PipelineResult:
+    """R13: add location-jump issues against the stored neighbours and recompute the status.
+
+    The caller looks the neighbours up; this stays free of I/O like the rest of the transform.
+    """
+    if result.status_hint == "rejected" or result.px_location is None:
+        return result
+    jumps = check_location_jump(result.px_location, previous, following, acknowledged)
+    if not jumps:
+        return result
+    issues = [*result.issues, *jumps]
+    return replace(result, issues=issues, status_hint=_status_hint(issues))

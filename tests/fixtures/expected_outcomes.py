@@ -116,5 +116,13 @@ EXPECTED: dict[int, dict[str, Any]] = {
     },
 }
 
+# End to end the samples also meet R13 (location continuity), which needs stored readings and so
+# never fires in the pure pipeline. Sample 4 reports device 866088073468440 in Richmond, VA one
+# hour after sample 3 put it in San Francisco: ~3,921 km/h, so it is quarantined.
+E2E_EXPECTED: dict[int, dict[str, Any]] = {
+    **EXPECTED,
+    4: {**EXPECTED[4], "status": "quarantined", "blocking": ["location_jump"]},
+}
+
 ACCEPTED_SAMPLES = sorted(i for i, e in EXPECTED.items() if e["status"] != "quarantined")
 QUARANTINED_SAMPLES = sorted(i for i, e in EXPECTED.items() if e["status"] == "quarantined")

@@ -13,9 +13,10 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.transform.continuity import Neighbour, checkable
 from app.transform.issues import Issue
 from app.transform.mapping import SensorExtras
-from app.transform.pipeline import PipelineResult
+from app.transform.pipeline import PipelineResult, apply_continuity
 
 
 class IdempotencyKeyReused(Exception):
@@ -108,11 +109,13 @@ async def claim_batch(conn: AsyncConnection, n: int, max_attempts: int) -> list[
             "  SELECT id FROM ingestions WHERE status = 'pending' AND attempts < :max "
             "  AND (next_attempt_at IS NULL OR next_attempt_at <= now()) "
             "  ORDER BY received_at FOR UPDATE SKIP LOCKED LIMIT :n) "
-            "RETURNING id, raw_json, (raw_json IS NULL) AS malformed, attempts, reprocess_count"
+            "RETURNING id, raw_json, (raw_json IS NULL) AS malformed, attempts, reprocess_count, "
+            "received_at"
         ),
         {"n": n, "max": max_attempts},
     )
-    return [dict(r._mapping) for r in result]
+    # RETURNING has no defined order; R13 needs readings of one device in arrival order
+    return sorted((dict(r._mapping) for r in result), key=lambda r: (r["received_at"], r["id"]))
 
 
 async def release_for_retry(conn: AsyncConnection, id_: UUID, error: str, attempts: int) -> None:
@@ -171,6 +174,63 @@ async def beat(conn: AsyncConnection, worker_id: str) -> None:
         ),
         {"w": worker_id},
     )
+
+
+# --------------------------------------------------------------------------- continuity (R13)
+
+
+async def lock_device(conn: AsyncConnection, device_imei: str) -> None:
+    """Serialize R13 check + write per device until the transaction ends.
+
+    Without it two workers could check two readings of one device against the same old
+    baseline and both pass, though neither saw the other.
+    """
+    await conn.execute(
+        sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:imei, 0))"), {"imei": device_imei}
+    )
+
+
+_NEIGHBOUR_SQL = (
+    "SELECT ingestion_id, timestamp_ms, latitude, longitude, "
+    "(px_location->>'location_accuracy')::float8 AS accuracy_m FROM readings "
+    "WHERE device_imei = :imei AND timestamp_ms {op} :ts ORDER BY timestamp_ms {order} LIMIT 1"
+)
+
+
+async def get_neighbours(
+    conn: AsyncConnection, device_imei: str, timestamp_ms: int
+) -> tuple[Neighbour | None, Neighbour | None]:
+    """The stored readings of the device just before and just after `timestamp_ms`."""
+    found: list[Neighbour | None] = []
+    for op, order in (("<", "DESC"), (">", "ASC")):
+        row = (
+            await conn.execute(
+                sa.text(_NEIGHBOUR_SQL.format(op=op, order=order)),
+                {"imei": device_imei, "ts": timestamp_ms},
+            )
+        ).first()
+        found.append(
+            None
+            if row is None
+            else Neighbour(
+                row.ingestion_id, row.timestamp_ms, row.latitude, row.longitude, row.accuracy_m
+            )
+        )
+    return found[0], found[1]
+
+
+async def with_continuity(
+    conn: AsyncConnection, result: PipelineResult, acknowledged: bool = False
+) -> PipelineResult:
+    """Lock the device, look up its neighbours and apply R13. A no-op when R13 cannot run."""
+    if result.status_hint == "rejected" or not checkable(result.px_location):
+        return result
+    assert result.px_location is not None
+    imei: str = result.px_location["device_imei"]
+    ts: int = result.px_location["timestamp"]
+    await lock_device(conn, imei)
+    previous, following = await get_neighbours(conn, imei, ts)
+    return apply_continuity(result, previous, following, acknowledged)
 
 
 # --------------------------------------------------------------------------- persist

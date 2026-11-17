@@ -151,8 +151,8 @@ replayed later.
 
 ## Open Questions
 
-*   **Who reviews quarantined payloads?** With the chosen policies, 5 of the
-    13 samples are quarantined. The design provides the review and promotion
+*   **Who reviews quarantined payloads?** With the chosen policies, 6 of the
+    13 samples are quarantined (5 by R0–R12, sample 4 by R13). The design provides the review and promotion
     endpoints, and a runbook that describes the review procedure. No team or
     person is assigned to do that work. The README states this as an
     assumption.
@@ -519,6 +519,7 @@ response lists every problem.
 | R10 | `ProbeTemperature.Celsius` is outside [−100, 100] °C | Warning `probe_fault`. `probe_temperature` becomes null and `probe_fault` becomes true |
 | R11 | Secondary range checks fail: humidity outside [0, 100], lux < 0, battery outside [0, 100], dBm outside [−150, −50], or negative accuracy meters | Warning `<field>_out_of_range`. The PX field becomes null |
 | R12 | `Accelerometer.G` is null but X, Y, and Z are present | Correction `magnitude_computed`, where magnitude = √(x² + y² + z²) |
+| R13 | The location is not reachable from the same device's stored reading just before or just after it (strictly different timestamp). d = haversine distance (R = 6,371,008.8 m); d_eff = max(0, d − (u₁ + u₂)), u = `location_accuracy` or 500 m; Δt = \|t₂ − t₁\| / 1000 s | d_eff > 1000 km/h · Δt + 1 km → blocking `location_jump`, one per failing neighbour, with the baseline and implied speed in `original`. Runs in the worker after the pure transform, under a per-device advisory lock |
 
 Notes on the ranges:
 
@@ -733,6 +734,7 @@ Whether a blocking code can be promoted:
 | `temperature_fault`, `unparseable_number` on temperature | yes (`temperature`, including null) | — |
 | `missing_field` on an overridable field | yes (that field) | — |
 | `conflicts_existing` | yes (`replace_existing: true`) | — |
+| `location_jump` | yes (`acknowledge: ["location_jump"]`, which keeps it as an operator warning; or corrected coordinates) | — |
 | `type_error` on `EntityName`, `EntryTimeUtc` | no | fix the code, then reprocess; or leave in quarantine |
 | `output_schema_violation` | no | always a code bug: fix it, then reprocess |
 
@@ -971,7 +973,7 @@ accuracy. Where a rejected option is a reasonable alternative, it is marked
 
 | Risk | Impact | Mitigation | Residual |
 | --- | --- | --- | --- |
-| Nobody owns quarantine review | 5 of 13 samples (and similar real traffic) wait indefinitely | Promote and reprocess endpoints; `docs/OPERATIONS.md` describes the procedure; the README states the assumption | Ownership is still open |
+| Nobody owns quarantine review | 6 of 13 samples (and similar real traffic) wait indefinitely | Promote and reprocess endpoints; `docs/OPERATIONS.md` describes the procedure; the README states the assumption | Ownership is still open |
 | Out-of-order retry under last-write-wins | An older reading replaces a newer one | Every replacement is copied to history with the replacing ingestion | Recoverable, not preventable |
 | Poison payload crashes the worker | The container restarts; webhooks fail during the restart | `attempts` incremented on claim; capped at 5; marked `failed` | Up to 5 restarts per poison payload |
 | Hung worker | Ingestions pile up as `pending` | Heartbeat; `/livez` returns `503` after 60 s; Render restarts the container | Up to about 60 s of delay |

@@ -13,6 +13,7 @@ from app.api.models import PromoteRequest
 from app.errors import ApiError
 from app.ingest import repository as repo
 from app.transform import transform
+from app.transform.issues import IssueCode
 
 REPROCESSABLE = ("rejected", "failed", "quarantined")
 BULK_MAX = 500
@@ -47,6 +48,9 @@ async def promote(
         )
     overrides = req.overrides.to_dict()
     result = transform(row.raw_json, overrides, int(time.time() * 1000))
+    result = await repo.with_continuity(
+        conn, result, acknowledged=IssueCode.LOCATION_JUMP in req.acknowledge
+    )
     if result.status_hint == "rejected" or result.blocking:
         raise ApiError(
             422,
@@ -103,6 +107,7 @@ async def promote(
                     "overrides": overrides,
                     "note": req.note,
                     "replace_existing": req.replace_existing,
+                    "acknowledge": list(req.acknowledge),
                 }
             ),
             "old": repo.dumps(old_issues),

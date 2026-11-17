@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.transform.output_validation import validate_px
-from tests.fixtures.expected_outcomes import EXPECTED
+from tests.fixtures.expected_outcomes import E2E_EXPECTED
 from tests.integration.helpers import submit, view
 
 
@@ -24,7 +24,7 @@ async def test_all_13_samples_end_to_end(
 
     views = [await view(client, sender_key, i) for i in ids]
     for n, v in enumerate(views, start=1):
-        expected = EXPECTED[n]
+        expected = E2E_EXPECTED[n]
         assert v["status"] == expected["status"], f"sample {n}"
         blocking = [i["code"] for i in v["issues"] if i["severity"] == "blocking"]
         assert blocking == expected["blocking"], f"sample {n}"
@@ -33,21 +33,25 @@ async def test_all_13_samples_end_to_end(
 
     # sample 8 (index 7) has a different timestamp from sample 1, so it replaced nothing
     assert views[7]["write_result"]["result"] == "inserted"
-    # 8 readings, 5 quarantined (design table)
+    # 7 readings, 6 quarantined (design table, plus sample 4 failing R13 against sample 3)
     accepted = [v for v in views if v["status"] in ("accepted", "accepted_with_corrections")]
     async with db.connect() as conn:
         rows = (await conn.execute(sa.text("SELECT px_sensor, px_location FROM readings"))).all()
         history = (
             await conn.execute(sa.text("SELECT count(*) FROM readings_history"))
         ).scalar_one()
-    assert len(rows) == len(accepted) == 8
+    assert len(rows) == len(accepted) == 7
     assert history == 0
     for r in rows:
         assert validate_px("sensor", r.px_sensor) == []
         assert validate_px("location", r.px_location) == []
     quarantined = [v for v in views if v["status"] == "quarantined"]
-    assert len(quarantined) == 5
+    assert len(quarantined) == 6
     assert all(v["candidate_sensor"] is not None and v["readings"] == [] for v in quarantined)
+    jump = next(i for i in views[3]["issues"] if i["code"] == "location_jump")
+    assert jump["original"]["neighbour"] == "previous"
+    assert jump["original"]["ingestion_id"] == ids[2]
+    assert jump["original"]["implied_speed_kmh"] > 3900
     assert views[9]["write_result"]["result"] == "inserted"
     async with db.connect() as conn:
         acct = (

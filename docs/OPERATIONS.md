@@ -37,6 +37,7 @@ The view shows `issues` (with `original` values), `candidate_sensor` / `candidat
 | `temperature_fault`, `unparseable_number` on temperature | promote with `temperature` (a number, or `null` to store no temperature) |
 | `missing_field` on an overridable field | promote with that field |
 | `conflicts_existing` | promote with `replace_existing: true` if the new data is right, otherwise leave |
+| `location_jump` | read `original` (baseline ingestion, distance, implied speed). Real move (air freight, device re-deployed): promote with `acknowledge: ["location_jump"]`. Bad fix: promote with corrected `latitude` / `longitude`, or leave |
 | `type_error` on `EntityName` / `EntryTimeUtc` | not promotable: leave, or fix the code and reprocess |
 | `output_schema_violation` | always a code bug: fix, deploy, then reprocess |
 | transform bug fixed | reprocess (a resend cannot change the outcome) |
@@ -61,7 +62,16 @@ curl -s -X POST "$API/api/ingestions/$ID/promote" -H "X-API-Key: $OP_KEY" \
 
 # conflicts_existing: replace the other ingestion's reading
 -d '{"note":"vendor correction","replace_existing":true}'
+
+# location_jump (sample 4 after sample 3): the shipment really flew
+-d '{"note":"air freight SFO-RIC confirmed with carrier","acknowledge":["location_jump"]}'
 ```
+
+**A run of `location_jump` for one device** usually means the *stored* baseline is the wrong one, or
+the device came back after a long gap somewhere new. Every later reading fails against the same
+point until a new baseline exists. Promote the oldest flagged reading first (acknowledge, or fix
+it), then reprocess the rest: `POST /api/ingestions/reprocess?status=quarantined`. A promoted
+reading is checked again against its neighbours, so promote in timestamp order.
 
 Results: `200` promoted; `409` not quarantined, or a reading with different content exists and
 `replace_existing` was not set (names the owner); `422` blocking issues remain (the response lists

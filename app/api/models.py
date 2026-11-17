@@ -77,6 +77,9 @@ class PromoteRequest(BaseModel):
     overrides: Overrides = Field(default_factory=Overrides)
     note: str = Field(min_length=1, max_length=500)
     replace_existing: bool = False
+    # Issue codes the operator has checked and accepts. Only checks that compare against
+    # other readings can be acknowledged; payload faults still need overrides.
+    acknowledge: list[Literal["location_jump"]] = Field(default_factory=list, max_length=1)
 
 
 class HealthView(BaseModel):

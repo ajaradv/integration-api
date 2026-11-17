@@ -34,6 +34,7 @@ class IssueCode(StrEnum):
     DBM_OUT_OF_RANGE = "dbm_out_of_range"
     ACCURACY_OUT_OF_RANGE = "accuracy_out_of_range"
     MAGNITUDE_COMPUTED = "magnitude_computed"
+    LOCATION_JUMP = "location_jump"
     # parser
     TYPE_ERROR = "type_error"
     UNPARSEABLE_NUMBER = "unparseable_number"
